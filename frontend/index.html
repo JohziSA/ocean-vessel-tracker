@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ocean Vessel Tracker</title>
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0a0f14;
+      --panel: #111820;
+      --border: #1c2a38;
+      --text: #e6edf3;
+      --muted: #8b9cb3;
+      --accent: #0ea5e9;
+      --success: #22c55e;
+      --danger: #ef4444;
+      --oil: #f59e0b;
+      --container: #3b82f6;
+      --cargo: #10b981;
+      --passenger: #a855f7;
+      --fishing: #14b8a6;
+      --military: #64748b;
+      --distress: #ef4444;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: var(--bg); color: var(--text); font-family: "Inter", system-ui, sans-serif; }
+    #app { display: flex; height: 100vh; overflow: hidden; }
+
+    #sidebar {
+      width: 400px; min-width: 340px;
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; z-index: 10;
+    }
+    .header {
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, #151c26 0%, var(--panel) 100%);
+    }
+    .header h1 { font-size: 1.15rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+    .header h1 span { color: var(--accent); }
+    .status-bar {
+      display: flex; gap: 12px; margin-top: 10px;
+      font-size: 0.75rem; color: var(--muted);
+    }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+    .status-dot.live { background: var(--success); box-shadow: 0 0 6px var(--success); }
+    .status-dot.off { background: #555; }
+
+    .filters {
+      padding: 10px 14px;
+      display: flex; gap: 6px; flex-wrap: wrap;
+      border-bottom: 1px solid var(--border);
+    }
+    .chip {
+      font-size: 0.7rem; padding: 4px 10px; border-radius: 999px;
+      background: #1a2330; border: 1px solid var(--border);
+      color: var(--muted); cursor: pointer; user-select: none;
+    }
+    .chip.active { background: #0c4a6e; border-color: var(--accent); color: #7dd3fc; }
+    .chip.distress { border-color: var(--distress); }
+    .chip.distress.active { background: #450a0a; color: #fca5a5; }
+    .chip.oil { border-color: var(--oil); }
+    .chip.oil.active { background: #451a03; color: #fcd34d; }
+
+    #vessel-list { flex: 1; overflow-y: auto; padding: 8px; }
+    .vessel-card {
+      background: #0f1620; border: 1px solid var(--border);
+      border-radius: 10px; padding: 12px 14px; margin-bottom: 8px;
+      cursor: pointer; position: relative;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .vessel-card:hover { border-color: #334155; background: #141c28; }
+    .vessel-card.locked { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); background: #0c1a2e; }
+    .vessel-card.distress { border-left: 3px solid var(--danger); }
+    .vessel-card.oil { border-left: 3px solid var(--oil); }
+
+    .v-type { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; margin-bottom: 3px; }
+    .v-type.Tanker { color: var(--oil); }
+    .v-type.Container { color: var(--container); }
+    .v-type.Cargo { color: var(--cargo); }
+    .v-type.Passenger { color: var(--passenger); }
+    .v-type.Fishing { color: var(--fishing); }
+    .v-type.Military { color: var(--military); }
+    .v-type.Tug { color: #94a3b8; }
+
+    .v-name { font-size: 0.92rem; font-weight: 600; margin-bottom: 5px; line-height: 1.25; }
+    .v-meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: 0.72rem; color: var(--muted); }
+    .lock-btn {
+      position: absolute; top: 10px; right: 10px;
+      background: transparent; border: 1px solid var(--border);
+      color: var(--muted); border-radius: 6px; padding: 3px 8px;
+      font-size: 0.7rem; cursor: pointer;
+    }
+    .lock-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .lock-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
+
+    #map-container { flex: 1; position: relative; }
+    #map { width: 100%; height: 100%; }
+
+    .map-overlay {
+      position: absolute; top: 14px; right: 14px; z-index: 5;
+      display: flex; flex-direction: column; gap: 8px; align-items: flex-end;
+    }
+    .overlay-card {
+      background: rgba(15, 22, 32, 0.94); border: 1px solid var(--border);
+      border-radius: 10px; padding: 12px 16px; backdrop-filter: blur(8px);
+      max-width: 340px; font-size: 0.85rem;
+    }
+    .overlay-card h3 { font-size: 0.98rem; margin-bottom: 6px; }
+    .close-lock { float: right; background: none; border: none; color: var(--muted); cursor: pointer; font-size: 1.15rem; }
+    .legend {
+      background: rgba(15, 22, 32, 0.92); border: 1px solid var(--border);
+      border-radius: 8px; padding: 8px 12px; font-size: 0.7rem;
+      display: flex; gap: 10px; flex-wrap: wrap;
+    }
+    .legend span { display: flex; align-items: center; gap: 4px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; }
+
+    .empty-state { text-align: center; padding: 40px 20px; color: var(--muted); font-size: 0.9rem; }
+
+    .maplibregl-popup-content {
+      background: #121820 !important; color: var(--text) !important;
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 12px; font-size: 0.8rem;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+    }
+    .maplibregl-popup-tip { border-top-color: #121820 !important; }
+
+    @keyframes pulse-distress {
+      0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+      70% { box-shadow: 0 0 0 14px rgba(239, 68, 68, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <div class="header">
+        <h1>⚓ <span>Ocean</span> Vessel Tracker</h1>
+        <div class="status-bar">
+          <span><span class="status-dot" id="ws-dot"></span><span id="ws-status">Connecting…</span></span>
+          <span id="poll-info">—</span>
+          <span id="vessel-count">0 vessels</span>
+        </div>
+      </div>
+      <div class="filters">
+        <div class="chip active" data-filter="all">All</div>
+        <div class="chip oil" data-filter="oil">Oil / Tanker</div>
+        <div class="chip" data-filter="Container">Container</div>
+        <div class="chip" data-filter="Cargo">Cargo</div>
+        <div class="chip" data-filter="Passenger">Passenger</div>
+        <div class="chip distress" data-filter="distress">Distress</div>
+      </div>
+      <div id="vessel-list">
+        <div class="empty-state">Waiting for vessel data…</div>
+      </div>
+    </aside>
+
+    <div id="map-container">
+      <div id="map"></div>
+      <div class="map-overlay">
+        <div class="legend">
+          <span><span class="dot" style="background:var(--oil)"></span> Oil/Tanker</span>
+          <span><span class="dot" style="background:var(--container)"></span> Container</span>
+          <span><span class="dot" style="background:var(--cargo)"></span> Cargo</span>
+          <span><span class="dot" style="background:var(--passenger)"></span> Passenger</span>
+          <span><span class="dot" style="background:var(--distress)"></span> Distress</span>
+        </div>
+        <div id="lock-panel" class="overlay-card" style="display:none">
+          <button class="close-lock" id="unlock-btn">×</button>
+          <h3 id="lock-title">—</h3>
+          <div id="lock-details" style="color:var(--muted); font-size:0.8rem; line-height:1.5"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const WS_URL = (location.hostname === "localhost" || location.hostname === "127.0.0.1")
+      ? "ws://127.0.0.1:8001/ws"
+      : `ws://${location.hostname}:8001/ws`;
+    const API_URL = (location.hostname === "localhost" || location.hostname === "127.0.0.1")
+      ? "http://127.0.0.1:8001"
+      : `http://${location.hostname}:8001`;
+
+    let vessels = [];
+    let lockedId = null;
+    let currentFilter = "all";
+    let map = null;
+    let markers = {};
+    let followInterval = null;
+    let ws = null;
+
+    function initMap() {
+      map = new maplibregl.Map({
+        container: "map",
+        style: {
+          version: 8,
+          sources: {
+            osm: {
+              type: "raster",
+              tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+              tileSize: 256,
+              attribution: "© OpenStreetMap"
+            }
+          },
+          layers: [{ id: "osm", type: "raster", source: "osm" }]
+        },
+        center: [20, 20],
+        zoom: 2.3,
+        attributionControl: false
+      });
+      map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
+      map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-left");
+      map.on("load", () => {
+        map.setPaintProperty("osm", "raster-opacity", 0.72);
+        map.setPaintProperty("osm", "raster-saturation", -0.55);
+        map.setPaintProperty("osm", "raster-brightness-min", 0.08);
+      });
+    }
+
+    function colorForVessel(v) {
+      if (v.is_distress) return "#ef4444";
+      if (v.vessel_type === "Tanker" || v.type_tag === "Oil" || v.type_tag === "LNG") return "#f59e0b";
+      if (v.vessel_type === "Container") return "#3b82f6";
+      if (v.vessel_type === "Cargo") return "#10b981";
+      if (v.vessel_type === "Passenger") return "#a855f7";
+      if (v.vessel_type === "Fishing") return "#14b8a6";
+      if (v.vessel_type === "Military") return "#64748b";
+      return "#0ea5e9";
+    }
+
+    function createMarkerEl(v) {
+      const el = document.createElement("div");
+      el.style.width = v.is_distress ? "20px" : "16px";
+      el.style.height = v.is_distress ? "20px" : "16px";
+      el.style.borderRadius = "50%";
+      el.style.background = colorForVessel(v);
+      el.style.border = "2px solid #fff";
+      el.style.boxShadow = "0 0 8px " + colorForVessel(v);
+      el.style.cursor = "pointer";
+      if (v.is_distress) el.style.animation = "pulse-distress 1.5s infinite";
+      return el;
+    }
+
+    function updateMarkers() {
+      const ids = new Set(vessels.map(v => v.id));
+      Object.keys(markers).forEach(id => {
+        if (!ids.has(id)) {
+          markers[id].remove();
+          delete markers[id];
+        }
+      });
+
+      vessels.forEach(v => {
+        if (markers[v.id]) {
+          markers[v.id].setLngLat([v.longitude, v.latitude]);
+          return;
+        }
+        const el = createMarkerEl(v);
+        const marker = new maplibregl.Marker({ element: el })
+          .setLngLat([v.longitude, v.latitude])
+          .setPopup(new maplibregl.Popup({ offset: 14 }).setHTML(
+            `<strong>${v.name}</strong><br/>
+             <span style="color:#8b9cb3">${v.vessel_type} · ${v.type_tag}</span><br/>
+             <span style="color:#8b9cb3">${v.speed_knots} kn · ${v.navigational_status}</span>`
+          ))
+          .addTo(map);
+        el.addEventListener("click", (e) => {
+          e.stopPropagation();
+          lockVessel(v.id);
+        });
+        markers[v.id] = marker;
+      });
+    }
+
+    function lockVessel(id) {
+      const v = vessels.find(x => x.id === id);
+      if (!v) return;
+      lockedId = id;
+      renderList();
+      showLockPanel(v);
+      map.flyTo({ center: [v.longitude, v.latitude], zoom: Math.max(map.getZoom(), 6), speed: 1.3 });
+      if (followInterval) clearInterval(followInterval);
+      followInterval = setInterval(() => {
+        const current = vessels.find(x => x.id === lockedId);
+        if (current && map) {
+          map.easeTo({ center: [current.longitude, current.latitude], duration: 900 });
+        }
+      }, 2500);
+    }
+
+    function unlock() {
+      lockedId = null;
+      if (followInterval) { clearInterval(followInterval); followInterval = null; }
+      document.getElementById("lock-panel").style.display = "none";
+      renderList();
+    }
+
+    function showLockPanel(v) {
+      document.getElementById("lock-title").textContent = v.name;
+      document.getElementById("lock-details").innerHTML = `
+        <div><strong>Type:</strong> ${v.vessel_type} (${v.type_tag})</div>
+        <div><strong>MMSI:</strong> ${v.mmsi}${v.imo ? " · IMO " + v.imo : ""}</div>
+        <div><strong>Flag:</strong> ${v.flag}</div>
+        <div><strong>Speed:</strong> ${v.speed_knots} knots</div>
+        <div><strong>Heading:</strong> ${v.heading}°</div>
+        <div><strong>Status:</strong> ${v.navigational_status}</div>
+        ${v.is_distress ? '<div style="color:#f87171;font-weight:600">⚠ DISTRESS / EMERGENCY</div>' : ""}
+        ${v.destination ? `<div><strong>Destination:</strong> ${v.destination}</div>` : ""}
+        ${v.draught ? `<div><strong>Draught:</strong> ${v.draught} m</div>` : ""}
+        ${v.length ? `<div><strong>Length:</strong> ${v.length} m</div>` : ""}
+        <div style="margin-top:6px;font-size:0.72rem;opacity:0.7">
+          Updated: ${new Date(v.last_updated).toLocaleTimeString()}
+        </div>
+      `;
+      document.getElementById("lock-panel").style.display = "block";
+    }
+
+    function filteredVessels() {
+      if (currentFilter === "all") return vessels;
+      if (currentFilter === "distress") return vessels.filter(v => v.is_distress);
+      if (currentFilter === "oil") return vessels.filter(v =>
+        v.vessel_type === "Tanker" || v.type_tag === "Oil" || v.type_tag === "LNG");
+      return vessels.filter(v => v.vessel_type === currentFilter);
+    }
+
+    function renderList() {
+      const list = document.getElementById("vessel-list");
+      const items = filteredVessels().sort((a, b) => {
+        if (a.is_distress !== b.is_distress) return a.is_distress ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+
+      if (items.length === 0) {
+        list.innerHTML = `<div class="empty-state">No vessels match current filter</div>`;
+        return;
+      }
+
+      list.innerHTML = items.map(v => `
+        <div class="vessel-card ${v.is_distress ? "distress" : ""} ${v.vessel_type === "Tanker" || v.type_tag === "Oil" ? "oil" : ""} ${lockedId === v.id ? "locked" : ""}"
+             data-id="${v.id}">
+          <button class="lock-btn ${lockedId === v.id ? "active" : ""}" data-lock="${v.id}">
+            ${lockedId === v.id ? "LOCKED" : "Lock"}
+          </button>
+          <div class="v-type ${v.vessel_type}">${v.vessel_type} · ${v.type_tag}${v.is_distress ? " · DISTRESS" : ""}</div>
+          <div class="v-name">${v.name}</div>
+          <div class="v-meta">
+            <span>${v.speed_knots} kn</span>
+            <span>${v.flag}</span>
+            <span>${v.navigational_status}</span>
+          </div>
+        </div>
+      `).join("");
+
+      list.querySelectorAll(".vessel-card").forEach(card => {
+        card.addEventListener("click", (e) => {
+          if (e.target.classList.contains("lock-btn")) return;
+          const id = card.dataset.id;
+          const v = vessels.find(x => x.id === id);
+          if (v) {
+            map.flyTo({ center: [v.longitude, v.latitude], zoom: 6 });
+            markers[id]?.togglePopup();
+          }
+        });
+      });
+      list.querySelectorAll(".lock-btn").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const id = btn.dataset.lock;
+          if (lockedId === id) unlock();
+          else lockVessel(id);
+        });
+      });
+    }
+
+    function connectWS() {
+      const dot = document.getElementById("ws-dot");
+      const status = document.getElementById("ws-status");
+      ws = new WebSocket(WS_URL);
+
+      ws.onopen = () => { dot.className = "status-dot live"; status.textContent = "Live"; };
+      ws.onclose = () => {
+        dot.className = "status-dot off";
+        status.textContent = "Reconnecting…";
+        setTimeout(connectWS, 3000);
+      };
+      ws.onerror = () => { status.textContent = "Error"; };
+
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === "state") {
+            vessels = msg.vessels || [];
+            document.getElementById("vessel-count").textContent = `${vessels.length} vessels`;
+            if (msg.last_poll) {
+              document.getElementById("poll-info").textContent =
+                `Poll #${msg.poll_count} · ${new Date(msg.last_poll).toLocaleTimeString()}`;
+            }
+            updateMarkers();
+            renderList();
+            if (lockedId) {
+              const v = vessels.find(x => x.id === lockedId);
+              if (v) showLockPanel(v);
+              else unlock();
+            }
+          }
+        } catch (e) { console.warn(e); }
+      };
+    }
+
+    document.querySelectorAll(".chip").forEach(chip => {
+      chip.addEventListener("click", () => {
+        document.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+        chip.classList.add("active");
+        currentFilter = chip.dataset.filter;
+        renderList();
+      });
+    });
+    document.getElementById("unlock-btn").addEventListener("click", unlock);
+
+    initMap();
+    connectWS();
+
+    fetch(`${API_URL}/api/vessels`)
+      .then(r => r.json())
+      .then(data => {
+        if (vessels.length === 0 && data.vessels) {
+          vessels = data.vessels;
+          updateMarkers();
+          renderList();
+          document.getElementById("vessel-count").textContent = `${vessels.length} vessels`;
+        }
+      }).catch(() => {});
+  </script>
+</body>
+</html>
