@@ -1,3 +1,6 @@
+<img width="1911" height="944" alt="image" src="https://github.com/user-attachments/assets/2e2c149e-4ce5-4bc9-89bd-057ec7ca90fe" />
+
+
 # Ocean Vessel Tracker
 
 Near-real-time web application for monitoring ships worldwide. Shows vessel type tags (Oil/Tanker, Container, Cargo, etc.), speed, heading, destination, and clearly flags vessels in distress. Supports locking onto any ship so the map follows it.
