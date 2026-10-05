@@ -1,3 +1,5 @@
+![Ocean Tracker](banner.jpg)
+
 <img width="1911" height="944" alt="image" src="https://github.com/user-attachments/assets/2e2c149e-4ce5-4bc9-89bd-057ec7ca90fe" />
 
 
